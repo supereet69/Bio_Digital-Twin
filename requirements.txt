@@ -3,6 +3,5 @@ numpy
 pandas
 altair
 graphviz
+scikit-learn
 scipy
-sklearn
-
