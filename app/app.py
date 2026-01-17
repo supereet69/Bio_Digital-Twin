@@ -249,8 +249,20 @@ if run_button:
         elif anomaly_type=="Sensor Fault":
             pH_anom += np.random.normal(0,0.15,len(pH_anom))
 
-    rec_base = predict_metal_recovery_dynamic(t_pred, pH_base, OD)
-    rec_anom = predict_metal_recovery_dynamic(t_pred, pH_anom, OD)
+# ================= METAL RECOVERY BY SYSTEM =================
+
+    if flask_id == 1:  # Bio-leaching (bacteria + metal)
+        rec_base = predict_metal_recovery_dynamic(t_pred, pH_base, OD)
+        rec_anom = predict_metal_recovery_dynamic(t_pred, pH_anom, OD)
+
+    elif flask_id == 2:  # Biological control (no metal present)
+        rec_base = np.zeros_like(t_pred)
+        rec_anom = np.zeros_like(t_pred)
+
+    elif flask_id == 3:  # Abiotic control (chemical leaching only)
+        rec_base = 0.15 * predict_metal_recovery_dynamic(t_pred, pH_base, 0.05)
+        rec_anom = 0.15 * predict_metal_recovery_dynamic(t_pred, pH_anom, 0.05)
+
 
     logs = []
 
@@ -264,7 +276,13 @@ if run_button:
             fault = fault_map.get(anomaly_type)
             logs.append(random.choice(ERROR_LIBRARY[anomaly_type]))
         else:
-            logs.append("🟢 System operating in stable region")
+           if flask_id == 1:
+                logs.append("🟢 Bio-leaching reactor stable")
+            elif flask_id == 2:
+                logs.append("🟢 Biological control – no metal present")
+            else:
+                logs.append("🟢 Abiotic chemical leaching active")
+
 
         flow_box.graphviz_chart(render_bio_flowsheet("run", fault), use_container_width=True)
 
@@ -310,31 +328,40 @@ if run_button:
 
 if optimize_button:
 
-    flask_df = clean_df[clean_df["Flask_ID"]==flask_id]
-    t_obs = flask_df["Time_days"].values
-    pH_obs = flask_df["pH"].values
-    OD = np.nanmean(flask_df["OD600"].values)
-    params = fit_ph_model(t_obs, pH_obs)
+    if flask_id != 1:
+        st.warning("⚠ Optimization is only valid for Bio-leaching system (Flask 1). Control experiments do not represent metal recovery processes.")
 
-    T_vals = np.linspace(290,330,15)
-    PD_vals = np.linspace(0.05,0.25,15)
+        kpi1.metric("Optimal T (K)", "N/A")
+        kpi2.metric("Optimal PD", "N/A")
+        kpi3.metric("Max Recovery (%)", "N/A")
+        kpi4.metric("Grid Points", "N/A")
 
-    best_T,best_PD,best_rec,grid = optimize_operating_conditions(
-        t_obs,pH_obs,params,OD,T_vals,PD_vals,future_days
-    )
+    else:
+        flask_df = clean_df[clean_df["Flask_ID"]==flask_id]
+        t_obs = flask_df["Time_days"].values
+        pH_obs = flask_df["pH"].values
+        OD = np.nanmean(flask_df["OD600"].values)
+        params = fit_ph_model(t_obs, pH_obs)
 
-    df = pd.DataFrame(grid, columns=["T","PD","Recovery"])
+        T_vals = np.linspace(290,330,15)
+        PD_vals = np.linspace(0.05,0.25,15)
 
-    opt_plot.altair_chart(
-        alt.Chart(df).mark_rect().encode(
-            x="T:O", y="PD:O",
-            color=alt.Color("Recovery:Q", scale=alt.Scale(scheme="viridis")),
-            tooltip=["T","PD","Recovery"]
-        ).properties(height=300),
-        use_container_width=True
-    )
+        best_T,best_PD,best_rec,grid = optimize_operating_conditions(
+            t_obs,pH_obs,params,OD,T_vals,PD_vals,future_days
+        )
 
-    kpi1.metric("Optimal T (K)", f"{best_T:.1f}")
-    kpi2.metric("Optimal PD", f"{best_PD:.2f}")
-    kpi3.metric("Max Recovery (%)", f"{best_rec:.2f}")
-    kpi4.metric("Grid Points", f"{len(grid)}")
+        df = pd.DataFrame(grid, columns=["T","PD","Recovery"])
+
+        opt_plot.altair_chart(
+            alt.Chart(df).mark_rect().encode(
+                x="T:O", y="PD:O",
+                color=alt.Color("Recovery:Q", scale=alt.Scale(scheme="viridis")),
+                tooltip=["T","PD","Recovery"]
+            ).properties(height=300),
+            use_container_width=True
+        )
+
+        kpi1.metric("Optimal T (K)", f"{best_T:.1f}")
+        kpi2.metric("Optimal PD", f"{best_PD:.2f}")
+        kpi3.metric("Max Recovery (%)", f"{best_rec:.2f}")
+        kpi4.metric("Grid Points", f"{len(grid)}")
